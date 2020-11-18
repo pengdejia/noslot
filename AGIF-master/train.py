@@ -123,7 +123,7 @@ if __name__ == "__main__":
             os.makedirs(args.log_dir)
         with open(os.path.join(args.log_dir, args.log_name), 'w') as fw:
             fw.write(str(best_epoch) + ',' + str(result))
-            
+
     elif args.method == "AGIF":
         model = ModelManager(
             args, len(dataset.word_alphabet),

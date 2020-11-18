@@ -527,13 +527,22 @@ class JointBertProcessor(object):
                 slot_var = Variable(torch.LongTensor(list(Evaluator.expand_list(sorted_slot))))
                 intent_var = Variable(torch.Tensor(sorted_intent))
                 if self.args.single_intent:
-                    length = intent_var.size()[1]
-                    intent_var = intent_var.flatten()
-                    index = torch.gt(intent_var, 0).nonzero()
-                    intent_var = index % length
-                    intent_var.reshape(-1)
-                    intent_var = torch.squeeze(intent_var)
-
+                    # length = intent_var.size()[1]
+                    # intent_var = intent_var.flatten()
+                    # index = torch.gt(intent_var, 0).nonzero()
+                    # intent_var = index % length
+                    # intent_var.reshape(-1)
+                    # intent_var = torch.squeeze(intent_var)
+                    batch_size, length = intent_var.size()
+                    intent_list = intent_var.flatten().numpy().tolist()
+                    target_list = []
+                    for index in range(batch_size):
+                        temp_intent_list = intent_list[index * length: (index + 1) * length]
+                        for i in range(len(temp_intent_list)):
+                            if temp_intent_list[i] > 0:
+                                target_list.append(i)
+                                break
+                    intent_var = torch.LongTensor(target_list)
                 # print(text_var.size())
                 # print(slot_var.size())
                 # print(intent_var.size())
@@ -914,13 +923,22 @@ class CPosModelBertProcessor(object):
                 intent_var = Variable(torch.Tensor(sorted_intent))
                 bio_var = slot_var.eq(0).to(dtype=torch.long)
                 if self.args.single_intent:
-                    length = intent_var.size()[1]
-                    intent_var = intent_var.flatten()
-                    index = torch.gt(intent_var, 0).nonzero()
-                    intent_var = index % length
-                    intent_var.reshape(-1)
-                    intent_var = torch.squeeze(intent_var)
-
+                    # length = intent_var.size()[1]
+                    # intent_var = intent_var.flatten()
+                    # index = torch.gt(intent_var, 0).nonzero()
+                    # intent_var = index % length
+                    # intent_var.reshape(-1)
+                    # intent_var = torch.squeeze(intent_var)
+                    batch_size, length = intent_var.size()
+                    intent_list = intent_var.flatten().numpy().tolist()
+                    target_list = []
+                    for index in range(batch_size):
+                        temp_intent_list = intent_list[index * length: (index + 1) * length]
+                        for i in range(len(temp_intent_list)):
+                            if temp_intent_list[i] > 0:
+                                target_list.append(i)
+                                break
+                    intent_var = torch.LongTensor(target_list)
                 # print(text_var.size())
                 # print(slot_var.size())
                 # print(intent_var.size())

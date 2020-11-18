@@ -122,6 +122,7 @@ class JointBert(nn.Module):  ####临时修改版
 
             return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
 
+
 class CPosModelBertIntent(nn.Module):  ####临时修改版
 
     def __init__(self, args, num_word, num_slot, num_intent):
