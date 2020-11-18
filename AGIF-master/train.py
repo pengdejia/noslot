@@ -4,7 +4,7 @@ import os, json, random
 import numpy as np
 import torch
 from models.module import ModelManager
-from models.module_new import JointBert, CPosModelBert
+from models.module_new import JointBert, CPosModelBert, CPosModelBertWithOutNoSlot, CPosModelBertIntent
 from utils.loader import DatasetManager, BertDatasetManager
 from utils.process import Processor, JointBertProcessor, CPosModelBertProcessor
 from utils.config import *
@@ -82,7 +82,48 @@ if __name__ == "__main__":
             os.makedirs(args.log_dir)
         with open(os.path.join(args.log_dir, args.log_name), 'w') as fw:
             fw.write(str(best_epoch) + ',' + str(result))
+    elif args.method == "borderWithoutNoSlot":
+        model = CPosModelBertWithOutNoSlot(
+            args, len(dataset.word_alphabet),
+            len(dataset.slot_alphabet),
+            len(dataset.intent_alphabet)
+        )
+        model.show_summary()
+        print(model)
+        processor = JointBertProcessor(dataset, model, args)
+        if args.do_train:
+            best_epoch = processor.train()
 
+        result = JointBertProcessor.validate(
+            os.path.join(args.save_dir, "model/model.pkl"),
+            dataset,
+            args.batch_size, len(dataset.intent_alphabet), args=args)
+        print('\nAccepted performance: ' + str(result) + " at test dataset;\n")
+        if not os.path.exists(args.log_dir):
+            os.makedirs(args.log_dir)
+        with open(os.path.join(args.log_dir, args.log_name), 'w') as fw:
+            fw.write(str(best_epoch) + ',' + str(result))
+
+    elif args.method == "borderIntent":
+        model = CPosModelBertIntent(
+            args, len(dataset.word_alphabet),
+            len(dataset.slot_alphabet),
+            len(dataset.intent_alphabet))
+        print(model)
+        model.show_summary()
+        processor = CPosModelBertProcessor(dataset, model, args)
+        if args.do_train:
+            best_epoch = processor.train()
+        result = CPosModelBertProcessor.validate(
+            os.path.join(args.save_dir, "model/model.pkl"),
+            dataset,
+            args.batch_size, len(dataset.intent_alphabet), args=args)
+        print('\nAccepted performance: ' + str(result) + " at test dataset;\n")
+        if not os.path.exists(args.log_dir):
+            os.makedirs(args.log_dir)
+        with open(os.path.join(args.log_dir, args.log_name), 'w') as fw:
+            fw.write(str(best_epoch) + ',' + str(result))
+            
     elif args.method == "AGIF":
         model = ModelManager(
             args, len(dataset.word_alphabet),
