@@ -122,6 +122,157 @@ class JointBert(nn.Module):  ####临时修改版
 
             return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
 
+class CPosModelBertIntent(nn.Module):  ####临时修改版
+
+    def __init__(self, args, num_word, num_slot, num_intent):
+        super(CPosModelBertIntent, self).__init__()
+
+        self.__num_word = num_word
+        self.__num_slot = num_slot
+        self.__num_intent = num_intent
+        self.__args = args
+
+        self.__transformer = Transformers(args.bert_model)
+
+        self.__tramsformer_hidden_dim = self.__transformer.hidden_size
+
+        self.__dropout = nn.Dropout(self.__args.dropout_rate)
+
+        #Initialize a no slot attention layer.
+        self.__attention_intent = AttentionIntent(
+            self.__tramsformer_hidden_dim,
+            self.__tramsformer_hidden_dim,
+            self.__args.attention_hidden_dim,
+            self.__tramsformer_hidden_dim,
+            self.__args.dropout_rate
+        )
+
+        # Initialize an self-attention layer.
+        self.__attention = AttentionQ(
+            self.__tramsformer_hidden_dim,
+            self.__tramsformer_hidden_dim,
+            self.__args.attention_hidden_dim,
+            self.__tramsformer_hidden_dim,
+            self.__args.dropout_rate
+        )
+
+        # Initialize an Decoder object for bio.
+        self.__bio_decoder = LSTMDecoder(
+            self.__tramsformer_hidden_dim,
+            self.__args.bio_decoder_hidden_dim,
+            2,
+            self.__args.dropout_rate,
+            embedding_dim=self.__args.bio_embedding_dim
+        )
+
+        self.__intent_Linear = nn.Linear(self.__tramsformer_hidden_dim *2, self.__num_intent)
+        # self.__slot_Linear = nn.Linear(self.__tramsformer_hidden_dim,self.__num_slot)
+        self.__slot_Linear = nn.Linear(2 * self.__tramsformer_hidden_dim, self.__num_slot)
+        self.__border_Linear = nn.Linear(self.__tramsformer_hidden_dim, 2)
+        self.__slot_decoder = LSTMDecoder(
+            2 * self.__tramsformer_hidden_dim,
+            self.__args.slot_decoder_hidden_dim,
+            num_slot,
+            self.__args.dropout_rate,
+            embedding_dim=self.__args.slot_embedding_dim
+        )
+
+    def show_summary(self):
+        """
+        print the abstract of the defined model.
+        """
+
+        print('Model parameters are listed as follows:\n')
+
+        print('\tnumber of word:                            {};'.format(self.__num_word))
+        print('\tnumber of slot:                            {};'.format(self.__num_slot))
+        print('\tnumber of intent:						    {};'.format(self.__num_intent))
+
+        print('\nEnd of parameters show. Now training begins.\n\n')
+
+    def forward(self, text, seq_lens, n_predicts=None, forced_slot=None, forced_bio=None):
+        """
+
+        :param text:
+        :param seq_lens:
+        :param n_predicts:
+        :param forced_slot:
+        :param forced_bio:
+        :return:
+        """
+
+        """
+        without bert, bilstm plus self attention,
+        """
+        # word_tensor, _ = self.__embedding(text)
+        # lstm_hiddens = self.__encoder(word_tensor, seq_lens)
+        # attention_hiddens = self.__attention(word_tensor, seq_lens)
+        # hiddens = torch.cat([attention_hiddens, lstm_hiddens], dim=1)
+
+        hiddens, cls_hidden = self.__transformer(text, seq_lens)
+
+        # print(hiddens.size())
+        # print(cls_hidden.size())
+        # print(len(seq_lens))
+        # print(seq_lens[:5])
+        # print(sum(seq_lens))
+
+
+
+        pred_BIO = self.__bio_decoder(
+            hiddens, seq_lens,
+            forced_input=forced_bio
+        )
+        # pred_BIO = self.__border_Linear(self.__dropout(hiddens))
+        _, feed_BIO = pred_BIO.topk(1)
+
+        torch.set_printoptions(profile="full")
+        #slot index
+        slot_index = torch.eq(feed_BIO, 0).float().expand_as(hiddens)
+        #no slot index
+        no_slot_index = feed_BIO.float().expand_as(hiddens)
+        # print(no_slot_index.reshape(-1))
+        # print(slot_index.reshape(-1))
+        # print(no_slot_index.size())
+        no_slot_tensor = torch.mul(hiddens, no_slot_index)
+        no_slot_intent = self.__attention_intent(cls_hidden.unsqueeze(1).float(), no_slot_tensor, seq_lens)
+        # print(no_slot_intent.size())
+        intent_tensor = torch.cat([cls_hidden, no_slot_intent], dim=1)
+        # print(intent_tensor.size())
+        pred_intent = self.__intent_Linear(self.__dropout(intent_tensor))
+
+        if forced_bio is not None:
+            feed_BIO = forced_bio.unsqueeze(1).float()
+        border_hidden = torch.mul(hiddens, feed_BIO.to(torch.float))
+        # print(hiddens.size(), border_hidden.size())
+        new_hiddens = self.__attention(hiddens, border_hidden, seq_lens)
+        # new_hiddens = self.__attention(hiddens,hiddens,seq_lens)  #self_attention
+        # print(new_hiddens.size())
+        total_hidden = torch.cat([new_hiddens, hiddens], dim=-1)
+
+        # total_hidden = hiddens
+        pred_slot = self.__slot_decoder(
+            total_hidden, seq_lens,
+            forced_input=forced_slot
+        )
+        # pred_slot =  self.__slot_Linear(self.__dropout(total_hidden))
+
+        # print("##########")
+        if n_predicts is None:
+            if self.__args.single_intent:
+                return F.log_softmax(pred_slot, dim=1), F.log_softmax(pred_BIO, dim=-1), F.log_softmax(pred_intent, dim=-1)
+            else:
+                return F.log_softmax(pred_slot, dim=1), F.log_softmax(pred_BIO, dim=-1), pred_intent
+        else:
+            _, slot_index = pred_slot.topk(n_predicts, dim=1)
+            #如果是单意图直接返回top1
+            if self.__args.single_intent:
+                _, intent_index = pred_intent.topk(n_predicts, dim=1)
+            else:
+                intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
+
+            return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+
 
 class CPosModelBert(nn.Module):  ####临时修改版
 
@@ -249,6 +400,87 @@ class CPosModelBert(nn.Module):  ####临时修改版
             return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
 
 
+class CPosModelBertWithOutNoSlot(nn.Module):  ####去掉no slot层
+    def __init__(self, args, num_word, num_slot, num_intent):
+        super(CPosModelBertWithOutNoSlot, self).__init__()
+
+        self.__num_word = num_word
+        self.__num_slot = num_slot
+        self.__num_intent = num_intent
+        self.__args = args
+
+        self.__transformer = Transformers(args.bert_model)
+
+        self.__tramsformer_hidden_dim = self.__transformer.hidden_size
+
+        self.__dropout = nn.Dropout(self.__args.dropout_rate)
+        self.__intent_Linear = nn.Linear(self.__tramsformer_hidden_dim, self.__num_intent)
+        # Initialize an self-attention layer.
+        self.__slot_decoder = LSTMDecoder(
+            self.__tramsformer_hidden_dim,
+            self.__args.slot_decoder_hidden_dim,
+            num_slot,
+            self.__args.dropout_rate,
+            embedding_dim=self.__args.slot_embedding_dim
+        )
+
+    def show_summary(self):
+        """
+        print the abstract of the defined model.
+        """
+
+        print('Model parameters are listed as follows:\n')
+
+        print('\tnumber of word:                            {};'.format(self.__num_word))
+        print('\tnumber of slot:                            {};'.format(self.__num_slot))
+        print('\tnumber of intent:						    {};'.format(self.__num_intent))
+
+        print('\nEnd of parameters show. Now training begins.\n\n')
+
+    def forward(self, text, seq_lens, n_predicts=None, forced_slot=None, forced_bio=None):
+        """
+
+        :param text:
+        :param seq_lens:
+        :param n_predicts:
+        :param forced_slot:
+        :param forced_bio:
+        :return:
+        """
+
+        """
+        without bert, bilstm plus self attention,
+        """
+        # word_tensor, _ = self.__embedding(text)
+        # lstm_hiddens = self.__encoder(word_tensor, seq_lens)
+        # attention_hiddens = self.__attention(word_tensor, seq_lens)
+        # hiddens = torch.cat([attention_hiddens, lstm_hiddens], dim=1)
+
+        hiddens, cls_hidden = self.__transformer(text, seq_lens)
+        pred_intent = self.__intent_Linear(self.__dropout(cls_hidden))
+
+        pred_slot = self.__slot_decoder(
+            hiddens, seq_lens,
+            forced_input=forced_slot
+        )
+        # pred_slot =  self.__slot_Linear(self.__dropout(total_hidden))
+
+        # print("##########")
+        if n_predicts is None:
+            if self.__args.single_intent:
+                return F.log_softmax(pred_slot, dim=1),  F.log_softmax(pred_intent, dim=-1)
+            else:
+                return F.log_softmax(pred_slot, dim=1),  pred_intent
+        else:
+            _, slot_index = pred_slot.topk(n_predicts, dim=1)
+            #如果是单意图直接返回top1
+            if self.__args.single_intent:
+                _, intent_index = pred_intent.topk(n_predicts, dim=1)
+            else:
+                intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
+
+            return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+
 
 class QKVAttention(nn.Module):
     """
@@ -344,6 +576,58 @@ class AttentionQ(nn.Module):
         dropout_x = self.__dropout_layer(input_x)
         dropout_y = self.__dropout_layer(input_y)
 
+        attention_x = self.__attention_layer(
+            dropout_x, dropout_y, dropout_y
+        )
+
+        flat_x = torch.cat(
+            [attention_x[i][:seq_lens[i], :] for
+             i in range(0, len(seq_lens))], dim=0
+        )
+        return flat_x
+
+
+class AttentionIntent(nn.Module):
+
+    def __init__(self, input_dim,kv_dim ,hidden_dim, output_dim, dropout_rate):
+        super(AttentionIntent, self).__init__()
+
+        # Record parameters.
+        self.__input_dim = input_dim
+        self.__hidden_dim = hidden_dim
+        self.__kv_dim = kv_dim
+        self.__output_dim = output_dim
+        self.__dropout_rate = dropout_rate
+
+        # Record network parameters.
+        self.__dropout_layer = nn.Dropout(self.__dropout_rate)
+        self.__attention_layer = QKVAttention(
+            self.__input_dim, self.__kv_dim, self.__kv_dim,
+            self.__hidden_dim, self.__output_dim, self.__dropout_rate
+        )
+
+    def recover(self,input,seq_lens):
+        start = 0
+        batch_size,max_size = len(seq_lens),seq_lens[0]
+        input_ori = torch.zeros(batch_size,max_size,input.size(-1))
+        if torch.cuda.is_available():
+            input_ori = input_ori.cuda()
+
+
+        for i in range(len(seq_lens)):
+            end = start + seq_lens[i]
+            input_ori[i,:seq_lens[i]] = input[start:end]
+            start = end
+        return input_ori
+
+
+    def forward(self, input_x,input_y, seq_lens):
+
+        input_y = self.recover(input_y,seq_lens)
+
+
+        dropout_x = self.__dropout_layer(input_x)
+        dropout_y = self.__dropout_layer(input_y)
         attention_x = self.__attention_layer(
             dropout_x, dropout_y, dropout_y
         )
