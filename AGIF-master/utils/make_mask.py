@@ -418,7 +418,7 @@ parser = argparse.ArgumentParser()
 # parser.add_argument('--dict_dir', '-dtd', type=str, default='save/smp_stackbert_ori/alphabet')
 
 parser.add_argument('--data_dir', '-dd', type=str, default='data/SNIPS')
-parser.add_argument('--dict_dir', '-dtd', type=str, default='save/total/border/SNIPS_uncased1/alphabet')
+parser.add_argument('--dict_dir', '-dtd', type=str, default='save/total/border111bak/SNIPS/alphabet')
 
 # parser.add_argument('--data_dir', '-dd', type=str, default='data/atis')
 # parser.add_argument('--dict_dir', '-dtd', type=str, default='save/atis_border_ori_1/alphabet')

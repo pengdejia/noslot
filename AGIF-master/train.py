@@ -76,7 +76,7 @@ if __name__ == "__main__":
         result = CPosModelBertProcessor.validate(
             os.path.join(args.save_dir, "model/model.pkl"),
             dataset,
-            args.batch_size, len(dataset.intent_alphabet), args=args)
+            args.batch_size, len(dataset.intent_alphabet), use_mask=args.use_mask, args=args)
         print('\nAccepted performance: ' + str(result) + " at test dataset;\n")
         if not os.path.exists(args.log_dir):
             os.makedirs(args.log_dir)
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         result = CPosModelBertProcessor.validate(
             os.path.join(args.save_dir, "model/model.pkl"),
             dataset,
-            args.batch_size, len(dataset.intent_alphabet), args=args)
+            args.batch_size, len(dataset.intent_alphabet), use_mask=True, args=args)
         print('\nAccepted performance: ' + str(result) + " at test dataset;\n")
         if not os.path.exists(args.log_dir):
             os.makedirs(args.log_dir)

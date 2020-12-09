@@ -21,7 +21,7 @@ parser.add_argument('--log_dir', '-lod', type=str, default='./log/total/border/S
 parser.add_argument('--log_name', '-ln', type=str, default='log.txt')
 parser.add_argument("--random_state", '-rs', help='random seed', type=int, default=7)
 parser.add_argument('--gpu', '-g', action='store_true', help='use gpu', required=False, default=True)
-
+parser.add_argument('--use_mask', '-mask', action='store_true', help='use mask decode', required=False, default=False)
 # Training parameters.
 parser.add_argument('--num_epoch', '-ne', type=int, default=30)
 parser.add_argument('--batch_size', '-bs', type=int, default=64)

@@ -113,14 +113,15 @@ class JointBert(nn.Module):  ####临时修改版
             else:
                 return F.log_softmax(pred_slot, dim=1),  pred_intent
         else:
-            _, slot_index = pred_slot.topk(n_predicts, dim=1)
-            # 如果是单意图直接返回top1
-            if self.__args.single_intent:
-                _, intent_index = pred_intent.topk(n_predicts, dim=1)
-            else:
-                intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
-
-            return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+            # _, slot_index = pred_slot.topk(n_predicts, dim=1)
+            # # 如果是单意图直接返回top1
+            # if self.__args.single_intent:
+            #     _, intent_index = pred_intent.topk(n_predicts, dim=1)
+            # else:
+            #     intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
+            #
+            # return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+            return F.softmax(pred_slot, dim=1), F.softmax(pred_intent, dim=-1)
 
 
 class CPosModelBertIntent(nn.Module):  ####临时修改版
@@ -265,14 +266,15 @@ class CPosModelBertIntent(nn.Module):  ####临时修改版
             else:
                 return F.log_softmax(pred_slot, dim=1), F.log_softmax(pred_BIO, dim=-1), pred_intent
         else:
-            _, slot_index = pred_slot.topk(n_predicts, dim=1)
-            #如果是单意图直接返回top1
-            if self.__args.single_intent:
-                _, intent_index = pred_intent.topk(n_predicts, dim=1)
-            else:
-                intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
-
-            return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+            # _, slot_index = pred_slot.topk(n_predicts, dim=1)
+            # #如果是单意图直接返回top1
+            # if self.__args.single_intent:
+            #     _, intent_index = pred_intent.topk(n_predicts, dim=1)
+            # else:
+            #     intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
+            #
+            # return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+            return F.softmax(pred_slot, dim=1), F.softmax(pred_intent, dim=-1)
 
 
 class CPosModelBert(nn.Module):  ####临时修改版
@@ -404,12 +406,14 @@ class CPosModelBert(nn.Module):  ####临时修改版
 
 
             #如果是单意图直接返回top1
-            if self.__args.single_intent:
-                _, intent_index = pred_intent.topk(n_predicts, dim=1)
-            else:
-                intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
-            _, slot_index = pred_slot.topk(n_predicts, dim=1)
-            return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+            # if self.__args.single_intent:
+            #     _, intent_index = pred_intent.topk(n_predicts, dim=1)
+            # else:
+            #     intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
+            # _, slot_index = pred_slot.topk(n_predicts, dim=1)
+            # return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+
+            return F.softmax(pred_slot, dim=1), F.softmax(pred_intent, dim=-1)
             #decode时传入no slot结果
             # print(feed_BIO.size(), intent_index.size(), slot_index.size())
             # compare_tensor = torch.zeros_like(feed_BIO)
@@ -491,15 +495,15 @@ class CPosModelBertWithOutNoSlot(nn.Module):  ####去掉no slot层
             else:
                 return F.log_softmax(pred_slot, dim=1),  pred_intent
         else:
-            _, slot_index = pred_slot.topk(n_predicts, dim=1)
-            #如果是单意图直接返回top1
-            if self.__args.single_intent:
-                _, intent_index = pred_intent.topk(n_predicts, dim=1)
-            else:
-                intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
-
-            return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
-
+            # _, slot_index = pred_slot.topk(n_predicts, dim=1)
+            # #如果是单意图直接返回top1
+            # if self.__args.single_intent:
+            #     _, intent_index = pred_intent.topk(n_predicts, dim=1)
+            # else:
+            #     intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
+            #
+            # return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+            return F.softmax(pred_slot, dim=1), F.softmax(pred_intent, dim=-1)
 
 class QKVAttention(nn.Module):
     """

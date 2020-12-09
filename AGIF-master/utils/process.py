@@ -18,6 +18,7 @@ from collections import Counter
 # 	https://github.com/MiuLab/SlotGated-SLU/blob/master/utils.py
 from utils import miulab
 from tensorboardX import SummaryWriter
+import pickle
 
 
 def multilabel2one_hot(labels, nums):
@@ -764,7 +765,8 @@ class JointBertProcessor(object):
     @staticmethod
     def prediction(model, dataset, mode, batch_size, args, use_mask=False):
         model.eval()
-
+        if use_mask:
+            domain_tensor = pickle.load(open(os.path.join(args.data_dir, "domain_tensor.pkl"), 'rb'))
         if mode == "dev":
             dataloader = dataset.batch_delivery('dev', batch_size=batch_size, shuffle=False, is_digital=False)
         elif mode == "test":
@@ -824,13 +826,20 @@ class JointBertProcessor(object):
                 var_text['selects'] = var_text['selects'].cuda()
                 var_text['mask'] = var_text['mask'].cuda()
 
-            slot_idx, intent_idx = model(var_text, seq_lens, n_predicts=1)
+            # slot_idx, intent_idx = model(var_text, seq_lens, n_predicts=1)
+            slot_tensor, intent_tensor = model(var_text, seq_lens, n_predicts=1)
+            _, intent_index = intent_tensor.topk(1, dim=1)
+            intent_idx = intent_index.cpu().data.numpy().tolist()
+            nested_intent = list(Evaluator.expand_list(intent_idx))
+            if use_mask:
+                # print(nested_intent)
+                slot_tensor = Mydomain_decode(dataset.intent_alphabet.get_instance(nested_intent), slot_tensor,
+                                              seq_lens, domain_tensor)
 
-            # print("slot_idx{} length {}".format(slot_idx, len(slot_idx)))
-            # print("intent_idx{} length{}".format(intent_idx, len(intent_idx)))
-            # print(slot_idx)
-            # print(len(intent_idx))
-            # print(intent_idx)
+                # slot_tensor = slot_tensor
+
+            _, slot_idx = slot_tensor.topk(1, dim=1)
+            slot_idx = slot_idx.cpu().data.numpy().tolist()
 
             if args.single_intent:
                 for nested_intent_ in intent_idx:
@@ -1121,7 +1130,7 @@ class CPosModelBertProcessor(object):
 
         # Get the sentence list in test dataset.
 
-        ss, pred_slot, real_slot, exp_pred_intent, real_intent, pred_intent = JointBertProcessor.prediction(
+        ss, pred_slot, real_slot, exp_pred_intent, real_intent, pred_intent = CPosModelBertProcessor.prediction(
             model, dataset, "test", batch_size, args, use_mask=use_mask
         )
         slot_f1_score = miulab.computeF1Score(ss, real_slot, pred_slot, args)[0]
@@ -1141,7 +1150,8 @@ class CPosModelBertProcessor(object):
     @staticmethod
     def prediction(model, dataset, mode, batch_size, args, use_mask=False):
         model.eval()
-
+        if use_mask:
+            domain_tensor = pickle.load(open(os.path.join(args.data_dir, "domain_tensor.pkl"), 'rb'))
         if mode == "dev":
             dataloader = dataset.batch_delivery('dev', batch_size=batch_size, shuffle=False, is_digital=False)
         elif mode == "test":
@@ -1201,10 +1211,20 @@ class CPosModelBertProcessor(object):
                 var_text['selects'] = var_text['selects'].cuda()
                 var_text['mask'] = var_text['mask'].cuda()
 
-            slot_idx, intent_idx = model(var_text, seq_lens, n_predicts=1)
+            # slot_idx, intent_idx = model(var_text, seq_lens, n_predicts=1)
+            slot_tensor, intent_tensor = model(var_text, seq_lens, n_predicts=1)
+            _, intent_index = intent_tensor.topk(1, dim=1)
+            intent_idx = intent_index.cpu().data.numpy().tolist()
+            nested_intent = list(Evaluator.expand_list(intent_idx))
+            if use_mask:
+                # print(slot_tensor)
+                slot_tensor = Mydomain_decode(dataset.intent_alphabet.get_instance(nested_intent), slot_tensor,
+                                              seq_lens, domain_tensor)
+                # print(slot_tensor)
+                # slot_tensor = slot_tensor
 
-            # print("slot_idx{} length {}".format(slot_idx, len(slot_idx)))
-            # print("intent_idx{} length{}".format(intent_idx, len(intent_idx)))
+            _, slot_idx = slot_tensor.topk(1, dim=1)
+            slot_idx = slot_idx.cpu().data.numpy().tolist()
 
             if args.single_intent:
                 for nested_intent_ in intent_idx:
@@ -1253,3 +1273,33 @@ class CPosModelBertProcessor(object):
                         str(sl == rsl) + "\t" + c + "\t" + sl + "\t" + rsl + "\n")
                 writer.writelines("\n")
         return tokens, pred_slot, real_slot, pred_intent, real_intent, pred_intent
+
+
+def Mydomain_decode(intent_names, slot, seq_len, domain_tensor):
+    input_domain_tensor = []
+    for intent in intent_names:
+        if "#" in intent:
+            mask_tensor = None
+            cut_intents = intent.split("#")
+            for cut_intent in cut_intents:
+                if mask_tensor is None:
+                    mask_tensor = domain_tensor[cut_intent]
+                else:
+                    mask_tensor += domain_tensor[cut_intent]
+                mask_tensor /= len(cut_intents)
+        else:
+            mask_tensor = domain_tensor[intent]
+        input_domain_tensor.append(mask_tensor)
+        # input_domain_tensor = [domain_tensor[intent] for intent in intent_names]
+    input_domain_tensor = torch.tensor(input_domain_tensor).float()
+    if torch.cuda.is_available():
+        input_domain_tensor = input_domain_tensor.cuda()
+    domain_mask = []
+    for i in range(len(seq_len)):
+        number = seq_len[i]
+        domain_mask.append(input_domain_tensor[i].unsqueeze(0).repeat(number, 1))
+
+    domain_mask = torch.cat(domain_mask, 0)
+
+    new_slot = slot.clone() * domain_mask
+    return new_slot
