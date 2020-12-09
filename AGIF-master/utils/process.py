@@ -17,6 +17,7 @@ from collections import Counter
 # Utils functions copied from Slot-gated model, origin url:
 # 	https://github.com/MiuLab/SlotGated-SLU/blob/master/utils.py
 from utils import miulab
+from tensorboardX import SummaryWriter
 
 
 def multilabel2one_hot(labels, nums):
@@ -486,8 +487,22 @@ class JointBertProcessor(object):
         self.__criterion_2 = nn.BCEWithLogitsLoss()
 
         self.params = list(filter(lambda p: p.requires_grad, self.__model.parameters()))
-        self.__optimizer = optim.Adam(self.params, lr=self.__dataset.learning_rate, betas=(0.9, 0.999), eps=1e-8,
-                                      weight_decay=0)  # self.__dataset.l2_penalty) # (beta1, beta2)
+        # self.__optimizer = optim.Adam(self.params, lr=self.__dataset.learning_rate, betas=(0.9, 0.999), eps=1e-8,
+        #                               weight_decay=0)  # self.__dataset.l2_penalty) # (beta1, beta2)
+        if self.args.method == "borderWithoutNoSlot":
+            bert_params = list(map(id, self.__model._CPosModelBertWithOutNoSlot__transformer.parameters()))
+            rest_params = list((filter(lambda x: id(x) not in bert_params, self.__model.parameters())))
+            self.__optimizer = optim.Adam(
+                [{'params': self.__model._CPosModelBertWithOutNoSlot__transformer.parameters(), 'lr': self.__dataset.learning_rate},
+                 {'params': rest_params, "lr": self.args.other_learning_rate}])
+        elif self.args.method == "jointbert":
+            bert_params = list(map(id, self.__model._JointBert__transformer.parameters()))
+            rest_params = list((filter(lambda x: id(x) not in bert_params, self.__model.parameters())))
+            self.__optimizer = optim.Adam(
+                [{'params': self.__model._JointBert__transformer.parameters(),
+                  'lr': self.__dataset.learning_rate},
+                 {'params': rest_params, "lr": self.args.other_learning_rate}])
+
         if self.__load_dir:
             if self.args.gpu:
                 print("MODEL {} LOADED".format(str(self.__load_dir)))
@@ -506,6 +521,7 @@ class JointBertProcessor(object):
         best_epoch = 0
         no_improve = 0
         dataloader = self.__dataset.batch_delivery('train')
+        writer = SummaryWriter('./runs/new')
         for epoch in range(0, self.__dataset.num_epoch):
             total_slot_loss, total_intent_loss = 0.0, 0.0
 
@@ -533,6 +549,7 @@ class JointBertProcessor(object):
                     # intent_var = index % length
                     # intent_var.reshape(-1)
                     # intent_var = torch.squeeze(intent_var)
+
                     batch_size, length = intent_var.size()
                     intent_list = intent_var.flatten().numpy().tolist()
                     target_list = []
@@ -543,6 +560,7 @@ class JointBertProcessor(object):
                                 target_list.append(i)
                                 break
                     intent_var = torch.LongTensor(target_list)
+
                 # print(text_var.size())
                 # print(slot_var.size())
                 # print(intent_var.size())
@@ -570,7 +588,7 @@ class JointBertProcessor(object):
                 self.__optimizer.zero_grad()
                 batch_loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(self.params, 1)
+                torch.nn.utils.clip_grad_norm_(self.params, self.args.max_grad)
 
                 self.__optimizer.step()
 
@@ -582,6 +600,8 @@ class JointBertProcessor(object):
                     total_intent_loss += intent_loss.cpu().data.numpy()[0]
 
             time_con = time.time() - time_start
+            writer.add_scalar('slot_loss', total_slot_loss, epoch)
+            writer.add_scalar('intent_loss', total_intent_loss, epoch)
             print('[Epoch {:2d}]: The total slot loss on train data is {:2.6f}, intent data is {:2.6f}, cost ' \
                   'about {:2.6} seconds.'.format(epoch, total_slot_loss, total_intent_loss, time_con))
 
@@ -616,6 +636,7 @@ class JointBertProcessor(object):
                 if no_improve > self.args.patience:
                     print('early stop at epoch {}'.format(epoch))
                     break
+        writer.close()
         print('Best epoch is {}'.format(best_epoch))
         return best_epoch
 
@@ -880,8 +901,32 @@ class CPosModelBertProcessor(object):
         self.__criterion_2 = nn.BCEWithLogitsLoss()
 
         self.params = list(filter(lambda p: p.requires_grad, self.__model.parameters()))
-        self.__optimizer = optim.Adam(self.params, lr=self.__dataset.learning_rate, betas=(0.9, 0.999), eps=1e-8,
-                                      weight_decay=0)  # self.__dataset.l2_penalty) # (beta1, beta2)
+        # self.__optimizer = optim.Adam(self.params, lr=self.__dataset.learning_rate, betas=(0.9, 0.999), eps=1e-8,
+        #                               weight_decay=0)  # self.__dataset.l2_penalty) # (beta1, beta2)
+        ### add different lr for different layer
+        # print(self.__model._CPosModelBert__transformer.parameters())
+        #
+        #optimizer = optim.SGD([
+        #   {'params': base_params},
+        #  {'params': net.fc3.parameters(), 'lr': 0.001 * 10}], 0.001, momentum=0.9, weight_decay=1e-4)
+        if self.args.method == "border":
+            bert_params = list(map(id, self.__model._CPosModelBert__transformer.parameters()))
+            rest_params = list((filter(lambda x: id(x) not in bert_params, self.__model.parameters())))
+            self.__optimizer = optim.Adam(
+                [{'params': self.__model._CPosModelBert__transformer.parameters(), 'lr': self.__dataset.learning_rate},
+                 {'params': rest_params, "lr": self.args.other_learning_rate}])
+        elif self.args.method == "borderIntent":
+            bert_params = list(map(id, self.__model._CPosModelBertIntent__transformer.parameters()))
+            rest_params = list((filter(lambda x: id(x) not in bert_params, self.__model.parameters())))
+            self.__optimizer = optim.Adam(
+                [{'params': self.__model._CPosModelBertIntent__transformer.parameters(),
+                  'lr': self.__dataset.learning_rate},
+                 {'params': rest_params, "lr": self.args.other_learning_rate}])
+        # bert_params = list(map(id, self.__model._CPosModelBert__transformer.parameters()))
+        # rest_params = list((filter(lambda x: id(x) not in bert_params, self.__model.parameters())))
+        # self.__optimizer = optim.Adam([{'params': self.__model._CPosModelBert__transformer.parameters(), 'lr': self.__dataset.learning_rate},
+        #                                {'params': rest_params}])
+
         if self.__load_dir:
             if self.args.gpu:
                 print("MODEL {} LOADED".format(str(self.__load_dir)))
@@ -902,7 +947,7 @@ class CPosModelBertProcessor(object):
 
         dataloader = self.__dataset.batch_delivery('train')
         for epoch in range(0, self.__dataset.num_epoch):
-            total_slot_loss, total_intent_loss = 0.0, 0.0
+            total_slot_loss, total_intent_loss, total_bio_loss = 0.0, 0.0, 0.0
 
             time_start = time.time()
             self.__model.train()
@@ -921,6 +966,7 @@ class CPosModelBertProcessor(object):
                 text_var = padded_text
                 slot_var = Variable(torch.LongTensor(list(Evaluator.expand_list(sorted_slot))))
                 intent_var = Variable(torch.Tensor(sorted_intent))
+                # print(intent_var.size())
                 bio_var = slot_var.eq(0).to(dtype=torch.long)
                 if self.args.single_intent:
                     # length = intent_var.size()[1]
@@ -970,24 +1016,26 @@ class CPosModelBertProcessor(object):
                 else:
                     intent_loss = self.__criterion_2(intent_out, intent_var)
 
-                batch_loss = self.args.lambda_slot * slot_loss + self.args.lambda_intent * intent_loss + bio_loss
+                batch_loss = self.args.lambda_slot * slot_loss + self.args.lambda_intent * intent_loss + self.args.lambda_BIO*bio_loss
                 self.__optimizer.zero_grad()
                 batch_loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(self.params, 1)
+                torch.nn.utils.clip_grad_norm_(self.params, self.args.max_grad)
 
                 self.__optimizer.step()
 
                 try:
                     total_slot_loss += slot_loss.cpu().item()
                     total_intent_loss += intent_loss.cpu().item()
+                    total_bio_loss += bio_loss.cpu().item()
                 except AttributeError:
                     total_slot_loss += slot_loss.cpu().data.numpy()[0]
                     total_intent_loss += intent_loss.cpu().data.numpy()[0]
+                    total_bio_loss += bio_loss.cpu().data.numpy()[0]
 
             time_con = time.time() - time_start
-            print('[Epoch {:2d}]: The total slot loss on train data is {:2.6f}, intent data is {:2.6f}, cost ' \
-                  'about {:2.6} seconds.'.format(epoch, total_slot_loss, total_intent_loss, time_con))
+            print('[Epoch {:2d}]: The total slot loss on train data is {:2.6f}, intent data is {:2.6f}, BIO data is {:2.6f}, cost ' \
+                  'about {:2.6} seconds.'.format(epoch, total_slot_loss, total_intent_loss, total_bio_loss,time_con))
 
             change, time_start = False, time.time()
             dev_slot_f1_score, dev_intent_f1_score, dev_intent_acc_score, dev_sent_acc_score = self.estimate(if_dev=True, args=self.args,test_batch=self.__batch_size)
@@ -1051,6 +1099,13 @@ class CPosModelBertProcessor(object):
         sent_acc = Evaluator.semantic_acc(pred_slot, real_slot, pred_intent, real_intent)
         print("slot f1: {}, intent f1: {}, intent acc: {}, exact acc: {}".format(slot_f1_score, intent_f1_score,
                                                                                  intent_acc_score, sent_acc))
+        with open(os.path.join(args.save_dir, 'error.txt'), 'w', encoding="utf8") as fw:
+            for p_slot_list, r_slot_list, p_intent_list, r_intent in \
+                    zip(pred_slot, real_slot, pred_intent, real_intent):
+                fw.write(','.join(p_intent_list) + '\t' + ','.join(r_intent) + '\n')
+                for w, r_slot, in zip(p_slot_list, r_slot_list):
+                    fw.write(w + '\t' + r_slot + '\t''\n')
+                fw.write('\n\n')
         return slot_f1_score, intent_f1_score, intent_acc_score, sent_acc
 
     @staticmethod
@@ -1167,7 +1222,6 @@ class CPosModelBertProcessor(object):
         if 'MixSNIPS' in args.data_dir or 'MixATIS' in args.data_dir or 'DSTC' in args.data_dir:
             [p_intent.sort() for p_intent in pred_intent]
 
-        pad_texts = zip(padded_text_token, padded_text_selects)
         # print(real_intent[:3])
         # print(pred_intent[:3])
         # print(real_slot[:3])

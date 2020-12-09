@@ -48,7 +48,7 @@ if __name__ == "__main__":
                 len(dataset.intent_alphabet)
         )
         model.show_summary()
-        # print(model)
+        print(model)
         processor = JointBertProcessor(dataset, model, args)
         if args.do_train:
             best_epoch = processor.train()
@@ -68,7 +68,7 @@ if __name__ == "__main__":
             args, len(dataset.word_alphabet),
             len(dataset.slot_alphabet),
             len(dataset.intent_alphabet))
-        # print(model)
+        print(model)
         model.show_summary()
         processor = CPosModelBertProcessor(dataset, model, args)
         if args.do_train:
@@ -82,6 +82,7 @@ if __name__ == "__main__":
             os.makedirs(args.log_dir)
         with open(os.path.join(args.log_dir, args.log_name), 'w') as fw:
             fw.write(str(best_epoch) + ',' + str(result))
+
     elif args.method == "borderWithoutNoSlot":
         model = CPosModelBertWithOutNoSlot(
             args, len(dataset.word_alphabet),

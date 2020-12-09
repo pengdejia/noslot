@@ -300,7 +300,7 @@ class DatasetManager(object):
         if if_train_file:
             self.__word_alphabet.add_instance(text)
             self.__slot_alphabet.add_instance(slot)
-            self.__intent_alphabet.add_instance(intent, multi_intent=True)
+            self.__intent_alphabet.add_instance(intent, multi_intent=(self.__args.single_intent == False))
 
         # Record the raw text of dataset.
         self.__text_word_data[data_name] = text
@@ -311,7 +311,7 @@ class DatasetManager(object):
         self.__digit_word_data[data_name] = self.__word_alphabet.get_index(text)
         if if_train_file:
             self.__digit_slot_data[data_name] = self.__slot_alphabet.get_index(slot)
-            self.__digit_intent_data[data_name] = self.__intent_alphabet.get_index(intent, multi_intent=True)
+            self.__digit_intent_data[data_name] = self.__intent_alphabet.get_index(intent, multi_intent=(self.__args.single_intent == False))
 
     @staticmethod
     def __read_file(file_path):
@@ -610,7 +610,7 @@ class BertDatasetManager(object):
         if if_train_file:
             self.__word_alphabet.add_instance(text)
             self.__slot_alphabet.add_instance(slot)
-            self.__intent_alphabet.add_instance(intent, multi_intent=True)
+            self.__intent_alphabet.add_instance(intent, multi_intent=(self.__args.single_intent == False))
             self.__domain_alphabet.add_instance(domain)
 
         seq_len = [len(words) for words in text]
@@ -641,7 +641,7 @@ class BertDatasetManager(object):
 
         if if_train_file:
             self.__digit_slot_data[data_name] = self.__slot_alphabet.get_index(slot)
-            self.__digit_intent_data[data_name] = self.__intent_alphabet.get_index(intent, multi_intent=True)
+            self.__digit_intent_data[data_name] = self.__intent_alphabet.get_index(intent, multi_intent=(self.__args.single_intent == False))
             self.__digit_domain_data[data_name] = self.__domain_alphabet.get_index(domain)
 
     @staticmethod

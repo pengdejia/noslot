@@ -366,10 +366,6 @@ class CPosModelBert(nn.Module):  ####临时修改版
 
         if forced_bio is not None:
             feed_BIO = forced_bio.unsqueeze(1).float()
-        # print("类型：")
-        # print(hiddens.type(), feed_BIO.type())
-        # print("大小：")
-        # print(hiddens.size(), feed_BIO.size())
         border_hidden = torch.mul(hiddens, feed_BIO.to(torch.float))
 
         new_hiddens = self.__attention(hiddens, border_hidden, seq_lens)
@@ -387,18 +383,40 @@ class CPosModelBert(nn.Module):  ####临时修改版
         # print("##########")
         if n_predicts is None:
             if self.__args.single_intent:
+                # pred_BIO = F.softmax(pred_BIO, dim=1)
+                # BI_slot = pred_BIO[:, 1].unsqueeze(dim=1)
+                # BI_slot = BI_slot.expand([pred_slot.size()[0], pred_slot.size()[1] - 2])
+                # pred_bio = torch.cat([pred_BIO, BI_slot], dim=1)
+                # pred_slot = F.softmax(pred_slot, dim=1)
+                # pred_slot = torch.mul(pred_slot, pred_bio)
+                # return pred_slot.log(), pred_BIO.log(), pred_intent.log_softmax(dim=-1)
                 return F.log_softmax(pred_slot, dim=1), F.log_softmax(pred_BIO, dim=-1), F.log_softmax(pred_intent, dim=-1)
             else:
                 return F.log_softmax(pred_slot, dim=1), F.log_softmax(pred_BIO, dim=-1), pred_intent
         else:
-            _, slot_index = pred_slot.topk(n_predicts, dim=1)
+            #将decode概率传入
+            # pred_BIO = F.softmax(pred_BIO, dim=1)
+            # BI_slot = pred_BIO[:, 1].unsqueeze(dim=1)
+            # BI_slot = BI_slot.expand([pred_slot.size()[0], pred_slot.size()[1] - 2])
+            # pred_bio = torch.cat([pred_BIO, BI_slot], dim=1)
+            # pred_slot = F.softmax(pred_slot, dim=1)
+            # pred_slot = torch.mul(pred_slot, pred_bio)
+
+
             #如果是单意图直接返回top1
             if self.__args.single_intent:
                 _, intent_index = pred_intent.topk(n_predicts, dim=1)
             else:
                 intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
-
+            _, slot_index = pred_slot.topk(n_predicts, dim=1)
             return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+            #decode时传入no slot结果
+            # print(feed_BIO.size(), intent_index.size(), slot_index.size())
+            # compare_tensor = torch.zeros_like(feed_BIO)
+            # bio_idx = torch.le(feed_BIO, compare_tensor).to(dtype=torch.long)
+            # # print("before", slot_index)
+            # slot_index = torch.mul(slot_index, bio_idx)
+            # print("after", slot_idx)
 
 
 class CPosModelBertWithOutNoSlot(nn.Module):  ####去掉no slot层
@@ -523,12 +541,14 @@ class QKVAttention(nn.Module):
         linear_query = self.__query_layer(input_query)
         linear_key = self.__key_layer(input_key)
         linear_value = self.__value_layer(input_value)
-
+        # print(linear_query.size(), linear_key.size(), linear_value.size())
         score_tensor = F.softmax(torch.matmul(
             linear_query,
             linear_key.transpose(-2, -1)
         ), dim=-1) / math.sqrt(self.__hidden_dim)
+        # print(score_tensor.size())
         forced_tensor = torch.matmul(score_tensor, linear_value)
+        # print(forced_tensor.size())
         forced_tensor = self.__dropout_layer(forced_tensor)
 
         return forced_tensor
@@ -576,7 +596,6 @@ class AttentionQ(nn.Module):
 
         dropout_x = self.__dropout_layer(input_x)
         dropout_y = self.__dropout_layer(input_y)
-
         attention_x = self.__attention_layer(
             dropout_x, dropout_y, dropout_y
         )
@@ -586,7 +605,6 @@ class AttentionQ(nn.Module):
              i in range(0, len(seq_lens))], dim=0
         )
         return flat_x
-
 
 class AttentionIntent(nn.Module):
 
@@ -638,7 +656,6 @@ class AttentionIntent(nn.Module):
              i in range(0, len(seq_lens))], dim=0
         )
         return flat_x
-
 
 class LSTMDecoder(nn.Module):
     """
