@@ -121,6 +121,8 @@ class Encoder(nn.Module):
         attention_hiddens = self.__attention(word_tensor, seq_lens)
         hiddens = torch.cat([attention_hiddens, lstm_hiddens], dim=2)
         c = self.__sentattention(hiddens, seq_lens)
+
+        print(hiddens.size(), c.size())
         return hiddens, c
 
 
@@ -272,7 +274,7 @@ class LSTMDecoder(nn.Module):
     Decoder structure based on unidirectional LSTM.
     """
 
-    def __init__(self, args, input_dim, hidden_dim, output_dim, dropout_rate, embedding_dim=None, extra_dim=None):
+    def __init__(self, args, input_dim, hidden_dim, output_dim, dropout_rate=0.2, embedding_dim=None, extra_dim=None):
         """ Construction function for Decoder.
 
         :param input_dim: input dimension of Decoder. In fact, it's encoder hidden size.
@@ -491,3 +493,195 @@ class UnflatSelfAttention(nn.Module):
         scores = F.softmax(scores, dim=1)
         context = scores.unsqueeze(2).expand_as(inp).mul(inp).sum(1)
         return context
+
+
+class CPosModel(nn.Module):  ####临时修改版
+
+    def __init__(self, args, num_word, num_slot, num_intent):
+        super(CPosModel, self).__init__()
+
+        self.__num_word = num_word
+        self.__num_slot = num_slot
+        self.__num_intent = num_intent
+        self.__args = args
+        self.__embedding = nn.Embedding(
+            self.__num_word,
+            self.__args.word_embedding_dim
+        )
+        # self.__transformer = Transformers(args.bert_model)
+        #
+        self.__model_hidden_dim = self.__args.encoder_hidden_dim + self.__args.attention_output_dim
+        self.G_encoder = Encoder(args)
+        self.__dropout = nn.Dropout(self.__args.dropout_rate)
+
+        # Initialize an embedding object.
+
+
+        # Initialize an LSTM Encoder object.
+        # self.__encoder = LSTMEncoder(
+        #     self.__args.word_embedding_dim,
+        #     self.__args.encoder_hidden_dim,
+        #     self.__args.dropout_rate
+        # )
+        #
+        # # Initialize an self-attention layer.
+        # self.__attention = SelfAttention(
+        #     self.__args.word_embedding_dim,
+        #     self.__args.attention_hidden_dim,
+        #     self.__args.attention_output_dim,
+        #     self.__args.dropout_rate
+        # )
+
+        # Initialize an Decoder object for intent.
+        # self.__sentattention = UnflatSelfAttention(
+        #     self.__model_hidden_dim,
+        #     self.__args.dropout_rate
+        # )
+        # Initialize an self-attention layer.
+
+
+        # Initialize an Decoder object for bio.
+        # self.__bio_decoder = LSTMDecoder(
+        #     self.__model_hidden_dim,
+        #     self.__args.bio_decoder_hidden_dim,
+        #     2,
+        #     self.__args.dropout_rate,
+        #     embedding_dim=self.__args.bio_embedding_dim
+        # )
+
+        # self.__intent_Linear = nn.Linear(self.__tramsformer_hidden_dim, self.__num_intent)
+        # self.__intent_decoder = LSTMDecoder(
+        #     self.__args.encoder_hidden_dim + self.__args.attention_output_dim,
+        #     self.__args.intent_decoder_hidden_dim,
+        #     self.__num_intent, self.__args.dropout_rate,
+        #     embedding_dim=self.__args.intent_embedding_dim
+        # )
+        # self.__slot_Linear = nn.Linear(self.__tramsformer_hidden_dim,self.__num_slot)
+        # self.__slot_Linear = nn.Linear(2 * self.__tramsformer_hidden_dim, self.__num_slot)
+        # self.__border_Linear = nn.Linear(self.__tramsformer_hidden_dim, 2)
+        # self.__slot_decoder = LSTMDecoder(
+        #     2 * self.__model_hidden_dim,
+        #     self.__args.slot_decoder_hidden_dim,
+        #     num_slot,
+        #     self.__args.dropout_rate,
+        #     embedding_dim=self.__args.slot_embedding_dim
+        # )
+
+    def show_summary(self):
+        """
+        print the abstract of the defined model.
+        """
+
+        print('Model parameters are listed as follows:\n')
+
+        print('\tnumber of word:                            {};'.format(self.__num_word))
+        print('\tnumber of slot:                            {};'.format(self.__num_slot))
+        print('\tnumber of intent:						    {};'.format(self.__num_intent))
+
+        print('\nEnd of parameters show. Now training begins.\n\n')
+
+    def forward(self, text, seq_lens, n_predicts=None, forced_slot=None, forced_bio=None, forced_intent=None):
+        """
+
+        :param text:
+        :param seq_lens:
+        :param n_predicts:
+        :param forced_slot:
+        :param forced_bio:
+        :return:
+        """
+
+        """
+        without bert, bilstm plus self attention,
+        """
+        word_tensor = self.__embedding(text)
+        print(word_tensor.size())
+        g_hiddens, g_c = self.G_encoder(word_tensor, seq_lens)
+        print(g_hiddens.size(), g_c.size())
+        output_tensor_list, sent_start_pos = [], 0
+        for sent_i in range(0, len(seq_lens)):
+            sent_end_pos = seq_lens[sent_i]
+            output_tensor_list.append(g_hiddens[sent_i, :sent_end_pos, ])
+        # print(len(output_tensor_list))
+        # print(type(output_tensor_list[0]))
+        # print(output_tensor_list[0].size())
+        # print(output_tensor_list[0:2])
+        hiddens = torch.cat(output_tensor_list, dim=0)
+        # hiddens = hiddens.squeeze()
+        return hiddens, g_c
+        # print(g_hiddens.size(), g_c.size())
+        # lstm_hiddens = self.__encoder(word_tensor, seq_lens)
+        # attention_hiddens = self.__attention(word_tensor, seq_lens)
+        # hiddens = torch.cat([attention_hiddens, lstm_hiddens], dim=1)
+        # pred_BIO = self.__bio_decoder(
+        #     hiddens, seq_lens,
+        #     forced_input=forced_bio
+        # )
+        # print(hiddens.size())
+        # pred_intent = self.__sentattention(
+        #     hiddens, seq_lens
+        # )
+        # print(pred_intent.size())
+        # # hiddens, cls_hidden = self.__transformer(text, seq_lens)
+        # # pred_intent = self.__intent_Linear(self.__dropout(cls_hidden))
+        #
+        #
+        # # pred_BIO = self.__border_Linear(self.__dropout(hiddens))
+        #
+        # _, feed_BIO = pred_BIO.topk(1)
+        #
+        # if forced_bio is not None:
+        #     feed_BIO = forced_bio.unsqueeze(1).float()
+        # border_hidden = torch.mul(hiddens, feed_BIO.to(torch.float))
+        #
+        # new_hiddens = self.__attentionQ(hiddens, border_hidden, seq_lens)
+        # # new_hiddens = self.__attention(hiddens, hiddens, seq_lens)  #self_attention
+        #
+        # total_hidden = torch.cat([new_hiddens, hiddens], dim=-1)
+        #
+        # # total_hidden = hiddens
+        # pred_slot = self.__slot_decoder(
+        #     total_hidden, seq_lens,
+        #     forced_input=forced_slot
+        # )
+        # # pred_slot =  self.__slot_Linear(self.__dropout(total_hidden))
+        #
+        # # print("##########")
+        # if n_predicts is None:
+        #     if self.__args.single_intent:
+        #         # pred_BIO = F.softmax(pred_BIO, dim=1)
+        #         # BI_slot = pred_BIO[:, 1].unsqueeze(dim=1)
+        #         # BI_slot = BI_slot.expand([pred_slot.size()[0], pred_slot.size()[1] - 2])
+        #         # pred_bio = torch.cat([pred_BIO, BI_slot], dim=1)
+        #         # pred_slot = F.softmax(pred_slot, dim=1)
+        #         # pred_slot = torch.mul(pred_slot, pred_bio)
+        #         # return pred_slot.log(), pred_BIO.log(), pred_intent.log_softmax(dim=-1)
+        #         return F.log_softmax(pred_slot, dim=1), F.log_softmax(pred_BIO, dim=-1), F.log_softmax(pred_intent, dim=-1)
+        #     else:
+        #         return F.log_softmax(pred_slot, dim=1), F.log_softmax(pred_BIO, dim=-1), pred_intent
+        # else:
+        #     #将decode概率传入
+        #     # pred_BIO = F.softmax(pred_BIO, dim=1)
+        #     # BI_slot = pred_BIO[:, 1].unsqueeze(dim=1)
+        #     # BI_slot = BI_slot.expand([pred_slot.size()[0], pred_slot.size()[1] - 2])
+        #     # pred_bio = torch.cat([pred_BIO, BI_slot], dim=1)
+        #     # pred_slot = F.softmax(pred_slot, dim=1)
+        #     # pred_slot = torch.mul(pred_slot, pred_bio)
+        #
+        #
+        #     #如果是单意图直接返回top1
+        #     # if self.__args.single_intent:
+        #     #     _, intent_index = pred_intent.topk(n_predicts, dim=1)
+        #     # else:
+        #     #     intent_index = (torch.sigmoid(pred_intent) > self.__args.threshold).nonzero()
+        #     # _, slot_index = pred_slot.topk(n_predicts, dim=1)
+        #     # return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
+        #
+        #     return F.softmax(pred_slot, dim=1), F.softmax(pred_intent, dim=-1)
+        #     #decode时传入no slot结果
+        #     # print(feed_BIO.size(), intent_index.size(), slot_index.size())
+        #     # compare_tensor = torch.zeros_like(feed_BIO)
+        #     # bio_idx = torch.le(feed_BIO, compare_tensor).to(dtype=torch.long)
+        #     # # print("before", slot_index)
+        #     # slot_index = torch.mul(slot_index, bio_idx)
+        #     # print("after", slot_idx)

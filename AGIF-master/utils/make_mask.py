@@ -11,15 +11,15 @@ import pickle
 from collections import defaultdict
 import numpy as np
 
+
 class Mask(object):
     def __init__(self,args):
         self._args = args
 
-
     def load_mask(self):
         domain_mask = {}
         dir_path = self._args.data_dir
-        if  os.path.exists(dir_path):
+        if os.path.exists(dir_path):
             path = os.path.joint(dir_path,"domain_mask.pkl")
             if os.path.exists(path):
                 f = open(path,'rb')
@@ -36,6 +36,7 @@ class Mask(object):
 
     def display_key(self,mask_dict):
         count = 0
+        print("意图数", len(list(mask_dict.keys())))
         for key in mask_dict.keys():
             count += len(mask_dict[key])
             print(key,len(mask_dict[key]))
@@ -61,7 +62,7 @@ class Mask(object):
         
         big_slot_dict = dict()
         for slot in slots:   
-            if '.' in slot :
+            if '.' in slot:
                 slot = slot.replace("B-","").replace("I-","")
                 group = slot.split(".")
                 if group[0] in big_slot_dict.keys():
@@ -78,6 +79,7 @@ class Mask(object):
 
         # print("intents : ",intents)
         print("slots :",slots)
+        print("size of slots", len(slots))
         # if pad_slot:
         #     slots = pad_slot + slots
 
@@ -94,7 +96,7 @@ class Mask(object):
         tensor_dict = {}
         for line in lines:
             line = line.strip()
-            if line :
+            if line:
                 Tags = line.split(" ")
                 if(len(Tags) > 1):
                     sen_slots.add(Tags[-1])
@@ -184,12 +186,152 @@ class Mask(object):
         f = open(save_tensor_path, 'rb')
         mask_tensor = pickle.load(f)
         print(mask_tensor)
-
+        return mask_dict
         # for key in tensor_dict.keys():
         #     print(key)
         #     print(tensor_dict[key])
         #     print("--"*20)
-    
+
+    def make_mask_bak(self, path, dict_path, pad_intent=None, pad_slot=None):
+        path1 = path + "/train.txt"
+        path2 = path + "/dev.txt"
+        path3 = path + "/test.txt"
+
+        slot_list_path = dict_path + "/slot_dict.txt"
+        intent_list_path = dict_path + "/domain_dict.txt"
+
+        save_tensor_path = path + "/domain_tensor_bak.pkl"
+        lines = mask.load_file(path1) + mask.load_file(path2)   + mask.load_file(path3)
+        slot_list = mask.load_file(slot_list_path)
+        slots = [slot.split("	")[0] for slot in slot_list]
+
+        big_slot_dict = dict()
+        for slot in slots:
+            if '.' in slot:
+                slot = slot.replace("B-", "").replace("I-", "")
+                group = slot.split(".")
+                if group[0] in big_slot_dict.keys():
+                    big_slot_dict[group[0]].append(group[0] + "." + group[1])
+                else:
+                    big_slot_dict[group[0]] = [group[0] + "." + group[1]]
+
+        for key in big_slot_dict.keys():
+            big_slot_dict[key] = list(set(big_slot_dict[key]))
+
+        # intent_list = mask.load_file(intent_list_path)
+        # intents =  [intent.split("	")[0] for intent in intent_list]
+
+        # print("intents : ",intents)
+        print("slots :", slots)
+        print("size of slots", len(slots))
+        # if pad_slot:
+        #     slots = pad_slot + slots
+
+        # if pad_intent:
+        #     intents = pad_intent +intents
+
+        # print("intents",intents)
+        # print("slots",slots)
+        # intent_idx = {intent:i for i,intent in enumerate(intents)}
+        slot_dict = {slot: i for i, slot in enumerate(slots)}
+        sen_slots = set()
+        mask_dict = defaultdict(set)
+
+        tensor_dict = {}
+        for line in lines:
+            line = line.strip()
+            if line:
+                Tags = line.split(" ")
+                if (len(Tags) > 1):
+                    sen_slots.add(Tags[-1])
+                else:
+
+                    if '#' in line:
+                        mutil_intents = line.split("#")
+                        for intent in mutil_intents:
+                            mask_dict[line] = mask_dict[line] | sen_slots
+                            sen_slots = set()
+                    else:
+                        mask_dict[line] = mask_dict[line] | sen_slots
+                        sen_slots = set()
+
+                    # ###smp
+                    # line = line.split("@")[0]
+                    # mask_dict[line] =  mask_dict[line]  |  sen_slots
+                    # sen_slots = set()
+
+        if pad_intent:
+            for intent in pad_intent:
+                mask_dict[intent] = slots
+
+        for key in mask_dict.keys():
+
+            # tensor = 100*np.ones(len(slots))
+            tensor = np.zeros(len(slots))
+            # tensor = np.ones(len(slots))
+
+            expand_slot = []
+            for slot in list(mask_dict[key]):
+                if 'B-' in slot or 'I-' in slot:
+                    new_slot = slot.replace("B-", "").replace("I-", "")
+
+                    if "." in new_slot:
+                        group_key = new_slot.split(".")[0]
+                        group_slots = big_slot_dict[group_key]
+                        for gslot in group_slots:
+                            expand_slot.append('B-' + gslot)
+                            expand_slot.append('I-' + gslot)
+
+                    # if 'fromloc' in new_slot or 'toloc' in new_slot :
+                    #     new_slot  = new_slot.replace("fromloc","").replace("toloc","")
+
+                    #     for group_key in ['fromloc','toloc']:
+                    #         group_slots = big_slot_dict[group_key]
+                    #         for gslot in group_slots:
+                    #             expand_slot.append('B-'+gslot)
+                    #             expand_slot.append('I-'+gslot)
+                    else:
+                        expand_slot.append('B-' + new_slot)
+                        expand_slot.append('I-' + new_slot)
+
+            expand_slot = list(set(expand_slot))
+
+            mask_dict[key] = expand_slot + ['O']
+            # if pad_slot:
+            #     mask_dict[key] = list(mask_dict[key]) + pad_slot
+
+            # print(mask_dict[key])
+
+            list_id = []  # [slot_dict[slot] for slot in mask_dict[key]]
+            for slot in mask_dict[key]:
+                if slot in slot_dict.keys():
+                    list_id.append(slot_dict[slot])
+            list_id = sorted(list_id)
+            list_id = np.array(list_id)
+            # print(list_id )
+            # print("#"*100)
+
+            tensor[list_id] = 1
+            if '#' not in key:
+                # tensor_dict[intent_idx[key]] = tensor
+                tensor_dict[key] = tensor
+
+        self.display_key(mask_dict)
+
+        f = open(save_tensor_path, 'wb')
+        pickle.dump(tensor_dict, f)
+
+        # for key in big_slot_dict.keys():
+        #     print(key)
+        #     print(big_slot_dict[key])
+        f = open(save_tensor_path, 'rb')
+        mask_tensor = pickle.load(f)
+        print(mask_tensor)
+        return mask_dict
+        # for key in tensor_dict.keys():
+        #     print(key)
+        #     print(tensor_dict[key])
+        #     print("--"*20)
     def my_get_intent_slot(self, lines):
         texts, slots, intents = [], [], []
         text, slot = [], []
@@ -225,7 +367,13 @@ class Mask(object):
         if isinstance(pad_slot, list):
             slots += pad_slot
         intent_list = mask.load_file(intent_list_path)
-        intents = [intent.split("\t")[0] for intent in intent_list]
+        intents = []
+        for intent in intent_list:
+            if "#" in intent.split("\t")[0]:
+                continue
+            else:
+                intents.append(intent.split("\t")[0])
+        # intents = [intent.split("\t")[0] for intent in intent_list]
         if isinstance(pad_intent, list):
             intents += pad_intent
         slots_dict = {}
@@ -241,24 +389,28 @@ class Mask(object):
             if intent not in intent_dict:
                 intent_dict[intent] = np.array([0] * len(slots))
         print(intents)
-        for k, v in intent_dict.items():
-            print(k, v)
-        lines = mask.load_file(path1) + mask.load_file(path2)  # + mask.load_file(path3)
+        print(len(intents))
+        # for k, v in intent_dict.items():
+        #     print(k, v)
+        lines = mask.load_file(path1) #+ mask.load_file(path2)  #+ mask.load_file(path3)
         texts, slots, intents = mask.my_get_intent_slot(lines)
         dict_intent_slots = {}
         for slot_list, intent_list in zip(slots, intents):
-            intent = intent_list[0]
-            if intent not in dict_intent_slots:
-                dict_intent_slots[intent] = []
-            for slot in slot_list:
-                if slot not in dict_intent_slots[intent]:
-                    dict_intent_slots[intent].append(slot)
+            temp_intent_list = intent_list[0].split("#")
+            # print(temp_intent_list)
+            for intent in temp_intent_list:
+                if intent not in dict_intent_slots:
+                    dict_intent_slots[intent] = []
+                for slot in slot_list:
+                    if slot not in dict_intent_slots[intent]:
+                        dict_intent_slots[intent].append(slot)
         for k, v in dict_intent_slots.items():
             print(k, v)
         for k, v in intent_dict.items():
             temp_slot_list = dict_intent_slots[k]
             for temp_slot in temp_slot_list:
-                v[slots_dict[temp_slot]] = 1
+                if temp_slot in slots_dict:
+                    v[slots_dict[temp_slot]] = 1
         for k, v in intent_dict.items():
             print(k, v)
         with open(save_tensor_path, 'wb') as f:
@@ -417,11 +569,11 @@ parser = argparse.ArgumentParser()
 # parser.add_argument('--data_dir', '-dd', type=str, default='data/smp')
 # parser.add_argument('--dict_dir', '-dtd', type=str, default='save/smp_stackbert_ori/alphabet')
 
-parser.add_argument('--data_dir', '-dd', type=str, default='data/SNIPS')
-parser.add_argument('--dict_dir', '-dtd', type=str, default='save/total/border111bak/SNIPS/alphabet')
+# parser.add_argument('--data_dir', '-dd', type=str, default='data/SNIPS')
+# parser.add_argument('--dict_dir', '-dtd', type=str, default='save/total/border111bak/SNIPS/alphabet')
 
-# parser.add_argument('--data_dir', '-dd', type=str, default='data/atis')
-# parser.add_argument('--dict_dir', '-dtd', type=str, default='save/atis_border_ori_1/alphabet')
+parser.add_argument('--data_dir', '-dd', type=str, default='data/ATIS')
+parser.add_argument('--dict_dir', '-dtd', type=str, default='save/total/border/ATIS/alphabet')
 
 # parser.add_argument('--data_dir', '-dd', type=str, default='data/snip_dataset')
 # parser.add_argument('--dict_dir', '-dtd', type=str, default='save/snips_incremental_jointbert_ori/alphabet')
@@ -436,4 +588,14 @@ dict_path = base + "/" + args.dict_dir
 if 'smp' in dict_path:
     mask.make_smp_mask(path,dict_path)#,pad_intent=['<pad>','<unk>'],pad_slot=['<pad>','<unk>'])
 else:
-    mask.my_make_mask(path,dict_path)#,pad_intent=['<pad>','<unk>'],pad_slot=['<pad>','<unk>'])
+    mask_dict = mask.make_mask(path,dict_path)#,pad_intent=['<pad>','<unk>'],pad_slot=['<pad>','<unk>'])
+    test_mask_dict = mask.make_mask_bak(path, dict_path)
+    for k, v in mask_dict.items():
+        if k in test_mask_dict:
+            test_v = test_mask_dict[k]
+            if v == test_v:
+                continue
+            else:
+                retD = list(set(test_v).difference(set(v)))
+                print(k, len(retD))
+                print(retD)

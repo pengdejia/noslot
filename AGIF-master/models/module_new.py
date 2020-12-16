@@ -312,6 +312,12 @@ class CPosModelBert(nn.Module):  ####临时修改版
         )
 
         self.__intent_Linear = nn.Linear(self.__tramsformer_hidden_dim, self.__num_intent)
+        # self.__intent_decoder = LSTMDecoder(
+        #     self.__args.encoder_hidden_dim + self.__args.attention_output_dim,
+        #     self.__args.intent_decoder_hidden_dim,
+        #     self.__num_intent, self.__args.dropout_rate,
+        #     embedding_dim=self.__args.intent_embedding_dim
+        # )
         # self.__slot_Linear = nn.Linear(self.__tramsformer_hidden_dim,self.__num_slot)
         self.__slot_Linear = nn.Linear(2 * self.__tramsformer_hidden_dim, self.__num_slot)
         self.__border_Linear = nn.Linear(self.__tramsformer_hidden_dim, 2)
@@ -371,7 +377,7 @@ class CPosModelBert(nn.Module):  ####临时修改版
         border_hidden = torch.mul(hiddens, feed_BIO.to(torch.float))
 
         new_hiddens = self.__attention(hiddens, border_hidden, seq_lens)
-        # new_hiddens = self.__attention(hiddens,hiddens,seq_lens)  #self_attention
+        # new_hiddens = self.__attention(hiddens, hiddens, seq_lens)  #self_attention
 
         total_hidden = torch.cat([new_hiddens, hiddens], dim=-1)
 
@@ -421,6 +427,8 @@ class CPosModelBert(nn.Module):  ####临时修改版
             # # print("before", slot_index)
             # slot_index = torch.mul(slot_index, bio_idx)
             # print("after", slot_idx)
+
+
 
 
 class CPosModelBertWithOutNoSlot(nn.Module):  ####去掉no slot层
@@ -504,6 +512,48 @@ class CPosModelBertWithOutNoSlot(nn.Module):  ####去掉no slot层
             #
             # return slot_index.cpu().data.numpy().tolist(), intent_index.cpu().data.numpy().tolist()
             return F.softmax(pred_slot, dim=1), F.softmax(pred_intent, dim=-1)
+
+
+class EmbeddingCollection(nn.Module):
+    """
+    Provide word vector and position vector encoding.
+    """
+
+    def __init__(self, input_dim, embedding_dim, max_len=5000):
+        super(EmbeddingCollection, self).__init__()
+
+        self.__input_dim = input_dim
+        # Here embedding_dim must be an even embedding.
+        self.__embedding_dim = embedding_dim
+        self.__max_len = max_len
+
+        # Word vector encoder.
+        self.__embedding_layer = nn.Embedding(
+            self.__input_dim, self.__embedding_dim
+        )
+
+        # Position vector encoder.
+        # self.__position_layer = torch.zeros(self.__max_len, self.__embedding_dim)
+        # position = torch.arange(0, self.__max_len).unsqueeze(1)
+        # div_term = torch.exp(torch.arange(0, self.__embedding_dim, 2) *
+        #                      (-math.log(10000.0) / self.__embedding_dim))
+
+        # Sine wave curve design.
+        # self.__position_layer[:, 0::2] = torch.sin(position * div_term)
+        # self.__position_layer[:, 1::2] = torch.cos(position * div_term)
+        #
+        # self.__position_layer = self.__position_layer.unsqueeze(0)
+        # self.register_buffer('pe', self.__position_layer)
+
+    def forward(self, input_x):
+        # Get word vector encoding.
+        embedding_x = self.__embedding_layer(input_x)
+
+        # Get position encoding.
+        # position_x = Variable(self.pe[:, :input_x.size(1)], requires_grad=False)
+
+        # Board-casting principle.
+        return embedding_x, embedding_x
 
 class QKVAttention(nn.Module):
     """
@@ -801,3 +851,84 @@ class LSTMDecoder(nn.Module):
                 sent_start_pos = sent_end_pos
 
         return torch.cat(output_tensor_list, dim=0)
+
+class LSTMEncoder(nn.Module):
+    """
+    Encoder structure based on bidirectional LSTM.
+    """
+
+    def __init__(self, embedding_dim, hidden_dim, dropout_rate):
+        super(LSTMEncoder, self).__init__()
+
+        # Parameter recording.
+        self.__embedding_dim = embedding_dim
+        self.__hidden_dim = hidden_dim // 2
+        self.__dropout_rate = dropout_rate
+
+        # Network attributes.
+        self.__dropout_layer = nn.Dropout(self.__dropout_rate)
+        self.__lstm_layer = nn.LSTM(
+            input_size=self.__embedding_dim,
+            hidden_size=self.__hidden_dim,
+            batch_first=True,
+            bidirectional=True,
+            dropout=self.__dropout_rate,
+            num_layers=1
+        )
+
+    def forward(self, embedded_text, seq_lens):
+        """ Forward process for LSTM Encoder.
+        (batch_size, max_sent_len)
+        -> (batch_size, max_sent_len, word_dim)
+        -> (batch_size, max_sent_len, hidden_dim)
+        -> (total_word_num, hidden_dim)
+        :param embedded_text: padded and embedded input text.
+        :param seq_lens: is the length of original input text.
+        :return: is encoded word hidden vectors.
+        """
+
+        # Padded_text should be instance of LongTensor.
+        dropout_text = self.__dropout_layer(embedded_text)
+
+        # Pack and Pad process for input of variable length.
+        packed_text = pack_padded_sequence(dropout_text, seq_lens, batch_first=True)
+        lstm_hiddens, (h_last, c_last) = self.__lstm_layer(packed_text)
+        padded_hiddens, _ = pad_packed_sequence(lstm_hiddens, batch_first=True)
+
+        return torch.cat([padded_hiddens[i][:seq_lens[i], :] for i in range(0, len(seq_lens))], dim=0)
+
+
+class SelfAttention(nn.Module):
+
+    def __init__(self, input_dim, hidden_dim, output_dim, dropout_rate):
+        super(SelfAttention, self).__init__()
+
+        # Record parameters.
+        self.__input_dim = input_dim
+        self.__hidden_dim = hidden_dim
+        self.__output_dim = output_dim
+        self.__dropout_rate = dropout_rate
+
+        # Record network parameters.
+        self.__dropout_layer = nn.Dropout(self.__dropout_rate)
+        self.__attention_layer = QKVAttention(
+            self.__input_dim, self.__input_dim, self.__input_dim,
+            self.__hidden_dim, self.__output_dim, self.__dropout_rate
+        )
+
+    def forward(self, input_x, seq_lens):
+        dropout_x = self.__dropout_layer(input_x)
+        attention_x = self.__attention_layer(
+            dropout_x, dropout_x, dropout_x
+        )
+
+        flat_x = torch.cat(
+            [attention_x[i][:seq_lens[i], :] for
+             i in range(0, len(seq_lens))], dim=0
+        )
+        return flat_x
+
+
+
+
+

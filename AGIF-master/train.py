@@ -3,7 +3,7 @@
 import os, json, random
 import numpy as np
 import torch
-from models.module import ModelManager
+from models.module import ModelManager, CPosModel
 from models.module_new import JointBert, CPosModelBert, CPosModelBertWithOutNoSlot, CPosModelBertIntent
 from utils.loader import DatasetManager, BertDatasetManager
 from utils.process import Processor, JointBertProcessor, CPosModelBertProcessor
@@ -37,9 +37,9 @@ if __name__ == "__main__":
     # Instantiate a dataset object.
     # dataset = DatasetManager(args)
 
-    dataset = BertDatasetManager(args)
-    dataset.quick_build()
-    dataset.show_summary()
+    # dataset = BertDatasetManager(args)
+    # dataset.quick_build()
+    # dataset.show_summary()
     best_epoch = 0
     if args.method == "jointbert":
         model = JointBert(
@@ -82,7 +82,28 @@ if __name__ == "__main__":
             os.makedirs(args.log_dir)
         with open(os.path.join(args.log_dir, args.log_name), 'w') as fw:
             fw.write(str(best_epoch) + ',' + str(result))
-
+    elif args.method == "borderWithoutbert":
+        dataset = DatasetManager(args)
+        dataset.quick_build()
+        dataset.show_summary()
+        model = CPosModel(
+            args, len(dataset.word_alphabet),
+            len(dataset.slot_alphabet),
+            len(dataset.intent_alphabet))
+        print(model)
+        model.show_summary()
+        processor = Processor(dataset, model, args)
+        if args.do_train:
+            best_epoch = processor.train()
+        result = Processor.validate(
+            os.path.join(args.save_dir, "model/model.pkl"),
+            dataset,
+            args.batch_size, len(dataset.intent_alphabet), use_mask=args.use_mask, args=args)
+        print('\nAccepted performance: ' + str(result) + " at test dataset;\n")
+        if not os.path.exists(args.log_dir):
+            os.makedirs(args.log_dir)
+        with open(os.path.join(args.log_dir, args.log_name), 'w') as fw:
+            fw.write(str(best_epoch) + ',' + str(result))
     elif args.method == "borderWithoutNoSlot":
         model = CPosModelBertWithOutNoSlot(
             args, len(dataset.word_alphabet),

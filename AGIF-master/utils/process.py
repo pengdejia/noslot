@@ -72,7 +72,7 @@ class Processor(object):
             print("The model has been loaded into GPU and cost {:.6f} seconds.\n".format(time_con))
 
         self.__criterion = nn.NLLLoss()
-        self.__criterion_intent = nn.BCEWithLogitsLoss()
+        self.__criterion_intent = nn.NLLLoss()
         self.__optimizer = optim.Adam(
             self.__model.parameters(), lr=self.__dataset.learning_rate, weight_decay=self.__dataset.l2_penalty
         )
@@ -101,6 +101,9 @@ class Processor(object):
                     text_batch, [(slot_batch, True), (intent_batch, False)])
                 sorted_intent = [multilabel2one_hot(intents, len(self.__dataset.intent_alphabet)) for intents in
                                  sorted_intent]
+                # print(type(padded_text))
+                # print(padded_text[''])
+                # print(padded_text['tokens'])
                 text_var = torch.LongTensor(padded_text)
                 slot_var = torch.LongTensor(sorted_slot)
                 intent_var = torch.Tensor(sorted_intent)
@@ -111,14 +114,14 @@ class Processor(object):
                     slot_var = slot_var.cuda()
                     intent_var = intent_var.cuda()
 
-                random_slot, random_intent = random.random(), random.random()
-                if random_slot < self.__dataset.slot_forcing_rate:
-                    slot_out, intent_out = self.__model(text_var, seq_lens, forced_slot=slot_var)
-                else:
-                    slot_out, intent_out = self.__model(text_var, seq_lens)
+
+                slot_out, bio_out, intent_out = self.__model(text_var, seq_lens)
+
 
                 slot_var = torch.cat([slot_var[i][:seq_lens[i]] for i in range(0, len(seq_lens))], dim=0)
+                print(slot_var.size(), slot_out.size())
                 slot_loss = self.__criterion(slot_out, slot_var)
+                print(intent_var.size(), intent_out.size())
                 intent_loss = self.__criterion_intent(intent_out, intent_var)
                 batch_loss = slot_loss + intent_loss
 
@@ -277,10 +280,14 @@ class Processor(object):
             real_slot.extend(sorted_slot)
             all_token.extend([pt[:seq_lens[idx]] for idx, pt in enumerate(padded_text)])
             for intents in list(Evaluator.expand_list(sorted_intent)):
-                if '#' in intents:
-                    real_intent.append(intents.split('#'))
-                else:
+                if args.single_intent:
+                    # print("Yes\t", intents)
                     real_intent.append([intents])
+                else:
+                    if '#' in intents:
+                        real_intent.append(intents.split('#'))
+                    else:
+                        real_intent.append([intents])
 
             digit_text = dataset.word_alphabet.get_index(padded_text)
             var_text = torch.LongTensor(digit_text)
@@ -808,10 +815,14 @@ class JointBertProcessor(object):
 
             real_slot.extend(sorted_slot)
             for intents in list(Evaluator.expand_list(sorted_intent)):
-                if '#' in intents:
-                    real_intent.append(intents.split('#'))
-                else:
+                if args.single_intent:
+                    # print("Yes\t", intents)
                     real_intent.append([intents])
+                else:
+                    if '#' in intents:
+                        real_intent.append(intents.split('#'))
+                    else:
+                        real_intent.append([intents])
 
             padded_text['tokens'] = torch.LongTensor(dataset.word_alphabet.get_index(padded_text['tokens']))
             padded_text['selects'] = torch.LongTensor(padded_text['selects'])
@@ -1193,10 +1204,14 @@ class CPosModelBertProcessor(object):
 
             real_slot.extend(sorted_slot)
             for intents in list(Evaluator.expand_list(sorted_intent)):
-                if '#' in intents:
-                    real_intent.append(intents.split('#'))
-                else:
+                if args.single_intent:
+                    # print("Yes\t", intents)
                     real_intent.append([intents])
+                else:
+                    if '#' in intents:
+                        real_intent.append(intents.split('#'))
+                    else:
+                        real_intent.append([intents])
 
             padded_text['tokens'] = torch.LongTensor(dataset.word_alphabet.get_index(padded_text['tokens']))
             padded_text['selects'] = torch.LongTensor(padded_text['selects'])
@@ -1281,12 +1296,15 @@ def Mydomain_decode(intent_names, slot, seq_len, domain_tensor):
         if "#" in intent:
             mask_tensor = None
             cut_intents = intent.split("#")
+            # print(type(domain_tensor[cut_intents[0]]))
             for cut_intent in cut_intents:
                 if mask_tensor is None:
                     mask_tensor = domain_tensor[cut_intent]
                 else:
                     mask_tensor += domain_tensor[cut_intent]
-                mask_tensor /= len(cut_intents)
+            # mask_tensor = mask_tensor.astype(np.float)
+            # mask_tensor /= len(cut_intents)
+            mask_tensor[mask_tensor > 1] = 1
         else:
             mask_tensor = domain_tensor[intent]
         input_domain_tensor.append(mask_tensor)
