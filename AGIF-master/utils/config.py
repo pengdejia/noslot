@@ -3,12 +3,12 @@ import argparse
 import torch
 import os
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
 
 
 parser = argparse.ArgumentParser(description='A Based on Bert no slot Framework for Joint Multiple Intent Detection and Slot Filling')
 
-parser.add_argument("--do_train", "-dt", action="store_true", default=True)
+parser.add_argument("--do_train", "-dt", action="store_true", default=False)
 parser.add_argument('--method', '-md', type=str, default='borderWithoutbert')
 #数据是单意图还是多意图
 parser.add_argument('--single_intent', '-si', action="store_true", default=True)
@@ -16,7 +16,7 @@ parser.add_argument('--single_intent', '-si', action="store_true", default=True)
 parser.add_argument('--data_dir', '-dd', help='dataset file path', type=str, default='./data/SNIPS')
 parser.add_argument('--save_dir', '-sd', type=str, default='./save/total/borderWithoutbert/SNIPS')
 parser.add_argument('--load_dir', '-ld', type=str, default=None)
-# parser.add_argument('--load_dir', '-ld', type=str, default='./save/total/border/SNIPS_uncased')
+# parser.add_argument('--load_dir', '-ld', type=str, default='./save/total/borderWithoutbert/SNIPS')
 parser.add_argument('--log_dir', '-lod', type=str, default='./log/total/borderWithoutbert/SNIPS')
 parser.add_argument('--log_name', '-ln', type=str, default='log.txt')
 parser.add_argument("--random_state", '-rs', help='random seed', type=int, default=7)

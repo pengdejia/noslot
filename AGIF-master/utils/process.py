@@ -72,11 +72,10 @@ class Processor(object):
             print("The model has been loaded into GPU and cost {:.6f} seconds.\n".format(time_con))
 
         self.__criterion = nn.NLLLoss()
-        self.__criterion_intent = nn.NLLLoss()
         self.__optimizer = optim.Adam(
-            self.__model.parameters(), lr=self.__dataset.learning_rate, weight_decay=self.__dataset.l2_penalty
+            self.__model.parameters(), lr=self.args.learning_rate, weight_decay=self.__dataset.l2_penalty
         )
-
+        self.params = list(filter(lambda p: p.requires_grad, self.__model.parameters()))
         if self.__load_dir:
             if self.args.gpu:
                 print("MODEL {} LOADED".format(str(self.__load_dir)))
@@ -87,12 +86,13 @@ class Processor(object):
                                           map_location=torch.device('cpu'))
 
     def train(self):
+
         best_dev_sent = 0.0
         best_epoch = 0
         no_improve = 0
         dataloader = self.__dataset.batch_delivery('train')
         for epoch in range(0, self.__dataset.num_epoch):
-            total_slot_loss, total_intent_loss = 0.0, 0.0
+            total_slot_loss, total_intent_loss, total_bio_loss = 0.0, 0.0, 0.0
             time_start = time.time()
             self.__model.train()
 
@@ -107,39 +107,57 @@ class Processor(object):
                 text_var = torch.LongTensor(padded_text)
                 slot_var = torch.LongTensor(sorted_slot)
                 intent_var = torch.Tensor(sorted_intent)
-                max_len = np.max(seq_lens)
+                slot_var = torch.cat([slot_var[i][:seq_lens[i]] for i in range(0, len(seq_lens))], dim=0)
+                bio_var = slot_var.eq(0).to(dtype=torch.long)
+                if self.args.single_intent:
+                    batch_size, length = intent_var.size()
+                    intent_list = intent_var.flatten().numpy().tolist()
+                    target_list = []
+                    for index in range(batch_size):
+                        temp_intent_list = intent_list[index * length: (index + 1) * length]
+                        for i in range(len(temp_intent_list)):
+                            if temp_intent_list[i] > 0:
+                                target_list.append(i)
+                                break
+                    intent_var = torch.LongTensor(target_list)
 
                 if self.args.gpu:
                     text_var = text_var.cuda()
                     slot_var = slot_var.cuda()
                     intent_var = intent_var.cuda()
+                    bio_var = bio_var.cuda()
 
 
                 slot_out, bio_out, intent_out = self.__model(text_var, seq_lens)
 
 
-                slot_var = torch.cat([slot_var[i][:seq_lens[i]] for i in range(0, len(seq_lens))], dim=0)
-                print(slot_var.size(), slot_out.size())
+
                 slot_loss = self.__criterion(slot_out, slot_var)
-                print(intent_var.size(), intent_out.size())
-                intent_loss = self.__criterion_intent(intent_out, intent_var)
-                batch_loss = slot_loss + intent_loss
+                intent_loss = self.__criterion(intent_out, intent_var)
+                bio_loss = self.__criterion(bio_out, bio_var)
+
+                batch_loss = self.args.lambda_slot * slot_loss + self.args.lambda_intent * intent_loss + self.args.lambda_BIO * bio_loss
 
                 self.__optimizer.zero_grad()
                 batch_loss.backward()
+
+                torch.nn.utils.clip_grad_norm_(self.params, self.args.max_grad)
+
                 self.__optimizer.step()
 
                 try:
                     total_slot_loss += slot_loss.cpu().item()
                     total_intent_loss += intent_loss.cpu().item()
+                    total_bio_loss += bio_loss.cpu().item()
                 except AttributeError:
                     total_slot_loss += slot_loss.cpu().data.numpy()[0]
                     total_intent_loss += intent_loss.cpu().data.numpy()[0]
+                    total_bio_loss += bio_loss.cpu().data.numpy()[0]
 
             time_con = time.time() - time_start
             print(
-                '[Epoch {:2d}]: The total slot loss on train data is {:2.6f}, intent data is {:2.6f}, cost ' \
-                'about {:2.6} seconds.'.format(epoch, total_slot_loss, total_intent_loss, time_con))
+                '[Epoch {:2d}]: The total slot loss on train data is {:2.6f}, intent data is {:2.6f}, bio data is {:2.6f}, cost ' \
+                'about {:2.6} seconds.'.format(epoch, total_slot_loss, total_intent_loss, total_bio_loss, time_con))
 
             change, time_start = False, time.time()
             dev_slot_f1_score, dev_intent_f1_score, dev_intent_acc_score, dev_sent_acc_score = self.estimate(
@@ -194,10 +212,7 @@ class Processor(object):
 
         num_intent = len(self.__dataset.intent_alphabet)
         slot_f1_score = miulab.computeF1Score(ss, real_slot, pred_slot, args)[0]
-        intent_f1_score = f1_score(
-            instance2onehot(self.__dataset.intent_alphabet.get_index, num_intent, real_intent),
-            instance2onehot(self.__dataset.intent_alphabet.get_index, num_intent, pred_intent),
-            average='macro')
+        intent_f1_score = Evaluator.intent_acc(pred_intent, real_intent)
         intent_acc_score = Evaluator.intent_acc(pred_intent, real_intent)
         sent_acc = Evaluator.semantic_acc(pred_slot, real_slot, pred_intent, real_intent)
         print("slot f1: {}, intent f1: {}, intent acc: {}, exact acc: {}".format(slot_f1_score, intent_f1_score,
@@ -214,7 +229,7 @@ class Processor(object):
         return slot_f1_score, intent_f1_score, intent_acc_score, sent_acc
 
     @staticmethod
-    def validate(model_path, dataset, batch_size, num_intent, args):
+    def validate(model_path, dataset, batch_size, num_intent,  args, use_mask=False):
         """
         validation will write mistaken samples to files and make scores.
         """
@@ -225,7 +240,7 @@ class Processor(object):
             model = torch.load(model_path, map_location=torch.device('cpu'))
 
         ss, pred_slot, real_slot, pred_intent, real_intent = Processor.prediction(
-            model, dataset, "test", batch_size, args)
+            model, dataset, "test", batch_size, args, use_mask=use_mask)
 
         # To make sure the directory for save error prediction.
         mistake_dir = os.path.join(dataset.save_dir, "error")
@@ -233,9 +248,7 @@ class Processor(object):
             os.mkdir(mistake_dir)
 
         slot_f1_score = miulab.computeF1Score(ss, real_slot, pred_slot, args)[0]
-        intent_f1_score = f1_score(instance2onehot(dataset.intent_alphabet.get_index, num_intent, real_intent),
-                                   instance2onehot(dataset.intent_alphabet.get_index, num_intent, pred_intent),
-                                   average='macro')
+        intent_f1_score = Evaluator.intent_acc(pred_intent, real_intent)
         intent_acc_score = Evaluator.intent_acc(pred_intent, real_intent)
         sent_acc = Evaluator.semantic_acc(pred_slot, real_slot, pred_intent, real_intent)
         print("slot f1: {}, intent f1: {}, intent acc: {}, exact acc: {}".format(slot_f1_score, intent_f1_score,
@@ -259,9 +272,10 @@ class Processor(object):
         return slot_f1_score, intent_f1_score, intent_acc_score, sent_acc
 
     @staticmethod
-    def prediction(model, dataset, mode, batch_size, args):
+    def prediction(model, dataset, mode, batch_size, args, use_mask=False):
         model.eval()
-
+        if use_mask:
+            domain_tensor = pickle.load(open(os.path.join(args.data_dir, "domain_tensor.pkl"), 'rb'))
         if mode == "dev":
             dataloader = dataset.batch_delivery('dev', batch_size=batch_size, shuffle=False, is_digital=False)
         elif mode == "test":
@@ -294,25 +308,44 @@ class Processor(object):
             max_len = np.max(seq_lens)
             if args.gpu:
                 var_text = var_text.cuda()
-            slot_idx, intent_idx = model(var_text, seq_lens, n_predicts=1)
+
+            slot_tensor, intent_tensor = model(var_text, seq_lens, n_predicts=1)
+            _, intent_index = intent_tensor.topk(1, dim=1)
+            intent_idx = intent_index.cpu().data.numpy().tolist()
+            nested_intent = list(Evaluator.expand_list(intent_idx))
+
+            if use_mask:
+                # print(nested_intent)
+                # print("fuck")
+                slot_tensor = Mydomain_decode(dataset.intent_alphabet.get_instance(nested_intent), slot_tensor, seq_lens,domain_tensor)
+
+
+            _, slot_idx = slot_tensor.topk(1, dim=1)
+            slot_idx = slot_idx.cpu().data.numpy().tolist()
+
+            if args.single_intent:
+                for nested_intent_ in intent_idx:
+                    pred_intent.append(dataset.intent_alphabet.get_instance(list(nested_intent_)))
+            else:
+                intent_idx_ = [[] for i in range(len(padded_text['tokens']))]
+                for item in intent_idx:
+                    intent_idx_[item[0]].append(item[1])
+                intent_idx = intent_idx_
+                pred_intent.extend(dataset.intent_alphabet.get_instance(intent_idx))
+
             nested_slot = Evaluator.nested_list([list(Evaluator.expand_list(slot_idx))], seq_lens)[0]
             pred_slot.extend(dataset.slot_alphabet.get_instance(nested_slot))
-            intent_idx_ = [[] for i in range(len(digit_text))]
-            for item in intent_idx:
-                intent_idx_[item[0]].append(item[1])
-            intent_idx = intent_idx_
-            pred_intent.extend(dataset.intent_alphabet.get_instance(intent_idx))
+
         if 'MixSNIPS' in args.data_dir or 'MixATIS' in args.data_dir or 'DSTC' in args.data_dir:
             [p_intent.sort() for p_intent in pred_intent]
+
         with open(os.path.join(args.save_dir, 'token.txt'), "w", encoding="utf8") as writer:
-            idx = 0
-            for line, slots, rss in zip(all_token, pred_slot, real_slot):
+            for line, slots, rss, intent, rintent in zip(all_token, pred_slot, real_slot, pred_intent, real_intent):
+                writer.writelines(str(intent == rintent) + "\t" + ",".join(intent) + "\t" + ",".join(rintent) + "\n")
                 for c, sl, rsl in zip(line, slots, rss):
                     writer.writelines(
-                        str(sl == rsl) + " " + c + " " + sl + " " + rsl + "\n")
-                idx = idx + len(line)
+                        str(sl == rsl) + "\t" + c + "\t" + sl + "\t" + rsl + "\n")
                 writer.writelines("\n")
-
         return all_token, pred_slot, real_slot, pred_intent, real_intent
 
 

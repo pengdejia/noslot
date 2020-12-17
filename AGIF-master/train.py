@@ -37,9 +37,9 @@ if __name__ == "__main__":
     # Instantiate a dataset object.
     # dataset = DatasetManager(args)
 
-    # dataset = BertDatasetManager(args)
-    # dataset.quick_build()
-    # dataset.show_summary()
+    dataset = BertDatasetManager(args)
+    dataset.quick_build()
+    dataset.show_summary()
     best_epoch = 0
     if args.method == "jointbert":
         model = JointBert(
